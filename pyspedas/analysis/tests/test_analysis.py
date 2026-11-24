@@ -383,6 +383,32 @@ class TestAnalysisFunctions(unittest.TestCase):
         self.assertTrue(d2[1][-1][0] == 15.0)
         self.assertTrue(len(d2[2]) == len(d2[0]))
 
+    def test_avg_data_width_trange(self):
+        """Fixed-width averaging must use only samples in the requested range."""
+        times = np.arange(1., 9.)
+        values = np.array([100., 200., 3., 4., 5., 6., 700., 800.])
+        store_data("width_range", data={"x": times, "y": values})
+        avg_data("width_range", trange=[3., 6.], width=2)
+        result = get_data("width_range-avg")
+        assert_allclose(result.y, [3.5, 5.5])
+        assert_allclose(result.times, [3.75, 5.25])
+
+        # The entire source remains available for subsequent calculations.
+        assert_allclose(get_data("width_range").y, values)
+        avg_data("width_range", width=2, newname="width_all")
+        assert_allclose(get_data("width_all").y, [150., 3.5, 5.5, 750.])
+
+    def test_avg_data_width_trange_dependencies(self):
+        """Time-dependent bins must follow the same selection as data."""
+        times = np.arange(1., 9.)
+        values = np.column_stack((times, times * 10))
+        bins = values + 100.
+        store_data("width_bins", data={"x": times, "y": values, "v": bins})
+        avg_data("width_bins", trange=[3., 6.], width=2)
+        result = get_data("width_bins-avg")
+        assert_allclose(result.y, [[3.5, 35.], [5.5, 55.]])
+        assert_allclose(result[2], [[103.5, 135.], [105.5, 155.]])
+
     def test_avg_data_idl(self):
         # Compare data with IDL avg_data
         # Requires file: avg_data_validate.tplot from
