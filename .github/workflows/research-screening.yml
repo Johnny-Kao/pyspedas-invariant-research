@@ -1,0 +1,32 @@
+name: PS01-PS05 invariant screening
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  baseline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pinned research tree
+        run: python -m pip install -e .
+      - name: Record environment
+        run: |
+          git rev-parse HEAD
+          python -V
+          python -m pip freeze
+      - name: Run all independent invariant checks
+        run: |
+          set -o pipefail
+          python research_screening.py 2>&1 | tee screening.log
+      - name: Preserve baseline output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baseline-screening
+          path: screening.log
+          if-no-files-found: warn
