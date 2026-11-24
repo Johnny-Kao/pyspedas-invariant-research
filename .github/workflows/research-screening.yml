@@ -4,29 +4,46 @@ on:
 permissions:
   contents: read
 jobs:
-  baseline:
+  coordinate-averaging:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install pinned research tree
+      - name: Install research tree
         run: python -m pip install -e .
-      - name: Record environment
-        run: |
-          git rev-parse HEAD
-          python -V
-          python -m pip freeze
-      - name: Run all independent invariant checks
+      - name: RED - new native regression tests on unmodified source
+        shell: bash
         run: |
           set -o pipefail
-          python research_screening.py 2>&1 | tee screening.log
-      - name: Preserve baseline output
+          git restore --source=9034d0fc -- pyspedas/cotrans_tools/cart2spc.py pyspedas/analysis/avg_data.py
+          trap 'git restore --source=HEAD -- pyspedas/cotrans_tools/cart2spc.py pyspedas/analysis/avg_data.py' EXIT
+          set +e
+          python -m unittest -v pyspedas.cotrans_tools.tests.test_cotrans.CotransTestCases.test_cart2spc_quadrants pyspedas.cotrans_tools.tests.test_cotrans.CotransTestCases.test_mlt_cardinal_directions pyspedas.analysis.tests.test_analysis.TestAnalysisFunctions.test_avg_data_width_trange pyspedas.analysis.tests.test_analysis.TestAnalysisFunctions.test_avg_data_width_trange_dependencies 2>&1 | tee red.log
+          result=${PIPESTATUS[0]}
+          set -e
+          test "$result" -eq 1
+          grep -F 'FAILED (failures=4)' red.log
+      - name: GREEN - native regressions and existing controls
         if: always()
-        uses: actions/upload-artifact@v4
+        shell: bash
+        run: |
+          set -o pipefail
+          git restore --source=HEAD -- pyspedas/cotrans_tools/cart2spc.py pyspedas/analysis/avg_data.py
+          python -m unittest -v pyspedas.cotrans_tools.tests.test_cotrans.CotransTestCases.test_cart2spc_quadrants pyspedas.cotrans_tools.tests.test_cotrans.CotransTestCases.test_mlt_cardinal_directions pyspedas.cotrans_tools.tests.test_cotrans.CotransTestCases.test_mlt pyspedas.analysis.tests.test_analysis.TestAnalysisFunctions.test_avg_data_width_trange pyspedas.analysis.tests.test_analysis.TestAnalysisFunctions.test_avg_data_width_trange_dependencies pyspedas.analysis.tests.test_analysis.TestAnalysisFunctions.test_avg_data pyspedas.analysis.tests.test_analysis.TestAnalysisFunctions.test_avg_data_idl 2>&1 | tee green.log
+      - name: Independent invariant controls
+        if: always()
+        shell: bash
+        run: |
+          set -o pipefail
+          python -m unittest -v research_screening.PS01Coordinates research_screening.PS02Averaging research_screening.PS03TimeInterpolation research_screening.PS05Rotation 2>&1 | tee independent.log
+      - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: baseline-screening
-          path: screening.log
+          name: coordinate-averaging-evidence
+          path: '*.log'
           if-no-files-found: warn
