@@ -1,63 +1,67 @@
-name: PS02 width range scientific validation
+name: PS02 exact staging validation
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  evidence:
+  regression:
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        case: [synthetic, real]
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/checkout@v5
         with:
-          repository: spedas/pyspedas
-          ref: 3e4cb176f6aeb1577fac288ca03199bcfc546c29
-          path: upstream
+          repository: Johnny-Kao/pyspedas
+          ref: 381ee114de2f9f380c5142734351f91894305fdc
+          fetch-depth: 3
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
           python-version: '3.14'
-      - run: python -m pip install -e ./upstream
-      - name: Baseline RED with independent reference
-        working-directory: upstream
+      - run: python -m pip install -e .
+      - name: Exact staging provenance and baseline RED
         env:
-          PYTHONPATH: ${{ github.workspace }}/upstream
+          PYTHONPATH: ${{ github.workspace }}
           MPLBACKEND: Agg
         run: |
           git rev-parse HEAD
-          python -P -c 'import pathlib, pyspedas; p=pathlib.Path(pyspedas.__file__).resolve(); assert p.is_relative_to(pathlib.Path.cwd()); print(p)'
-          python -P ../research_ps02_width_range.py ${{ matrix.case }} baseline
-      - name: Apply narrow candidate and verify GREEN
-        working-directory: upstream
+          python -P -c 'import pathlib, pyspedas; p=pathlib.Path(pyspedas.__file__).resolve(); print(p); assert p.is_relative_to(pathlib.Path.cwd())'
+          git restore --source=3e4cb176f6aeb1577fac288ca03199bcfc546c29 pyspedas/analysis/avg_data.py
+          python -P - <<'PY'
+          import unittest
+          prefix='pyspedas.analysis.tests.test_analysis.TestAnalysisFunctions.'
+          names=[prefix+'test_avg_data_width_trange',prefix+'test_avg_data_width_trange_dependencies']
+          result=unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromNames(names))
+          assert result.testsRun==2 and len(result.failures)==2 and not result.errors
+          PY
+      - name: Restore candidate and run avg_data tests including IDL
         env:
-          PYTHONPATH: ${{ github.workspace }}/upstream
+          PYTHONPATH: ${{ github.workspace }}
           MPLBACKEND: Agg
         run: |
+          git restore --source=HEAD pyspedas/analysis/avg_data.py
+          git diff --exit-code
+          python -P -m unittest -v pyspedas.analysis.tests.test_analysis.TestAnalysisFunctions.test_avg_data pyspedas.analysis.tests.test_analysis.TestAnalysisFunctions.test_avg_data_width_trange pyspedas.analysis.tests.test_analysis.TestAnalysisFunctions.test_avg_data_width_trange_dependencies pyspedas.analysis.tests.test_analysis.TestAnalysisFunctions.test_avg_data_idl
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: Johnny-Kao/pyspedas
+          ref: 381ee114de2f9f380c5142734351f91894305fdc
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+      - run: python -m pip install -e . --group doc
+      - run: python -m pip install -r docs/requirements.txt
+      - name: Build and inspect rendered documentation
+        run: |
+          make -C docs html
           python - <<'PY'
           from pathlib import Path
-          p=Path('pyspedas/analysis/avg_data.py')
+          p=next(Path('docs').rglob('utilities.html'))
           s=p.read_text()
-          old='count_in_range = len(time[(time >= time_start) & (time <= time_end)])'
-          assert s.count(old)==1
-          s=s.replace(old,'in_range = (time >= time_start) & (time <= time_end)\n        count_in_range = np.count_nonzero(in_range)')
-          old='ind = np.floor(bins / width)'
-          assert s.count(old)==1
-          s=s.replace(old,'# Keep bin indices aligned with the original data and dependencies.\n            ind = np.full(time.shape, -1.0)\n            ind[in_range] = np.floor(bins / width)')
-          p.write_text(s)
+          assert 'only samples within that range are used' in s
+          print('Verified rendered avg_data width documentation:', p)
           PY
-          git diff --check
-          git diff
-          python -P ../research_ps02_width_range.py ${{ matrix.case }} fixed
-      - name: Existing avg_data and IDL validation tests
-        if: matrix.case == 'real'
-        working-directory: upstream
-        env:
-          PYTHONPATH: ${{ github.workspace }}/upstream
-          MPLBACKEND: Agg
-        run: |
-          python -P -m unittest -v pyspedas.analysis.tests.test_analysis.TestAnalysisFunctions.test_avg_data pyspedas.analysis.tests.test_analysis.TestAnalysisFunctions.test_avg_data_idl
