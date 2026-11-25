@@ -31,8 +31,8 @@ jobs:
         run: |
           set -o pipefail
           git rev-parse HEAD
-          python -c 'import pyspedas; print(pyspedas.__file__)'
-          python ../research_ps04.py ${{ matrix.case }} 2>&1 | tee ../ps04-${{ matrix.case }}.log
+          python -P -c 'import pathlib, pyspedas; p=pathlib.Path(pyspedas.__file__).resolve(); print(p); assert p.is_relative_to(pathlib.Path.cwd())'
+          python -P ../research_ps04.py ${{ matrix.case }} 2>&1 | tee ../ps04-${{ matrix.case }}.log
       - uses: actions/upload-artifact@v6
         if: always()
         with:
