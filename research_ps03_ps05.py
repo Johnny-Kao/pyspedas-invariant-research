@@ -98,14 +98,14 @@ class RotationDeepDive(unittest.TestCase):
             print('PS05 small rotation rad',delta,'max abs err',float(np.max(np.abs(out-expected))))
     def test_stored_target_order(self):
         x=[0,2,4];t=[3,0,1,3,4]
-        y=Rotation.from_euler('z',[0,45,90],degrees=True).as_matrix()
+        y=Rotation.from_euler('z',np.array([[0.],[45.],[90.]]),degrees=True).as_matrix()
         expected=ps.interpolate_rotation(dict(x=x,y=y),t)
         ps.interpolate_rotation(dict(x=x,y=y),t,newname='ps05_rotation')
         actual=ps.get_data('ps05_rotation',dt=True)
         np.testing.assert_array_equal(actual.times,expected['x'])
         assert_allclose(actual.y,expected['y'])
     def test_gap_nan_whole_sample(self):
-        m=Rotation.from_euler('z',[0,30,60,90],degrees=True).as_matrix()
+        m=Rotation.from_euler('z',np.array([[0.],[30.],[60.],[90.]]),degrees=True).as_matrix()
         m[1,0,0]=np.nan;m[2,1,1]=np.nan
         out=ps.interpolate_rotation(dict(x=[0,1,2,3],y=m),[3,1.5,0,1.5],ignore_nans=True,max_gap_samples=1)['y']
         assert_allclose(out[[0,2]],m[[3,0]])

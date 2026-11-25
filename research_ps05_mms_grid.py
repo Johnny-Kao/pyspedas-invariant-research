@@ -7,7 +7,7 @@ from pyspedas.projects.mms.cotrans.mms_cotrans_qrotate import mms_cotrans_qrotat
 
 def run(times,name,inverse=False):
     ref_times=np.array([0.,2.,4.])
-    rotations=Rotation.from_euler('z',[0,90,180],degrees=True)
+    rotations=Rotation.from_euler('z',np.array([[0.],[90.],[180.]]),degrees=True)
     q=rotations.as_quat()
     vectors=np.tile([1.,0.,0.],(len(times),1))
     ps.store_data('ps05_mms_q',data={'x':ref_times,'y':q})
