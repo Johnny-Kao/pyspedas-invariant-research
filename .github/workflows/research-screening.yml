@@ -1,32 +1,63 @@
-name: PS01-PS05 invariant screening
+name: PS02 width range scientific validation
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  baseline:
+  evidence:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        case: [synthetic, real]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/checkout@v5
         with:
-          python-version: '3.12'
-      - name: Install pinned research tree
-        run: python -m pip install -e .
-      - name: Record environment
+          repository: spedas/pyspedas
+          ref: 3e4cb176f6aeb1577fac288ca03199bcfc546c29
+          path: upstream
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - run: python -m pip install -e ./upstream
+      - name: Baseline RED with independent reference
+        working-directory: upstream
+        env:
+          PYTHONPATH: ${{ github.workspace }}/upstream
+          MPLBACKEND: Agg
         run: |
           git rev-parse HEAD
-          python -V
-          python -m pip freeze
-      - name: Run all independent invariant checks
+          python -P -c 'import pathlib, pyspedas; p=pathlib.Path(pyspedas.__file__).resolve(); assert p.is_relative_to(pathlib.Path.cwd()); print(p)'
+          python -P ../research_ps02_width_range.py ${{ matrix.case }} baseline
+      - name: Apply narrow candidate and verify GREEN
+        working-directory: upstream
+        env:
+          PYTHONPATH: ${{ github.workspace }}/upstream
+          MPLBACKEND: Agg
         run: |
-          set -o pipefail
-          python research_screening.py 2>&1 | tee screening.log
-      - name: Preserve baseline output
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: baseline-screening
-          path: screening.log
-          if-no-files-found: warn
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('pyspedas/analysis/avg_data.py')
+          s=p.read_text()
+          old='count_in_range = len(time[(time >= time_start) & (time <= time_end)])'
+          assert s.count(old)==1
+          s=s.replace(old,'in_range = (time >= time_start) & (time <= time_end)\n        count_in_range = np.count_nonzero(in_range)')
+          old='ind = np.floor(bins / width)'
+          assert s.count(old)==1
+          s=s.replace(old,'# Keep bin indices aligned with the original data and dependencies.\n            ind = np.full(time.shape, -1.0)\n            ind[in_range] = np.floor(bins / width)')
+          p.write_text(s)
+          PY
+          git diff --check
+          git diff
+          python -P ../research_ps02_width_range.py ${{ matrix.case }} fixed
+      - name: Existing avg_data and IDL validation tests
+        if: matrix.case == 'real'
+        working-directory: upstream
+        env:
+          PYTHONPATH: ${{ github.workspace }}/upstream
+          MPLBACKEND: Agg
+        run: |
+          python -P -m unittest -v pyspedas.analysis.tests.test_analysis.TestAnalysisFunctions.test_avg_data pyspedas.analysis.tests.test_analysis.TestAnalysisFunctions.test_avg_data_idl
