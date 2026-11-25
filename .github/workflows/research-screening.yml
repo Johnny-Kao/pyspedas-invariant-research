@@ -1,4 +1,4 @@
-name: PS03 PS05 interpolation deep dive
+name: PS05B MMS public API and real MEC data A B
 on:
   workflow_dispatch:
 permissions:
@@ -10,7 +10,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ['3.12', '3.14']
+        case: [public, real]
     steps:
       - uses: actions/checkout@v5
       - uses: actions/checkout@v5
@@ -21,25 +21,35 @@ jobs:
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
-          python-version: ${{ matrix.python }}
+          python-version: '3.12'
       - run: python -m pip install -e ./upstream
-      - name: Independent reference checks
+      - name: Verify old behavior with public API
         working-directory: upstream
         env:
           PYTHONPATH: ${{ github.workspace }}/upstream
         run: |
           git rev-parse HEAD
-          python -P -c 'import pathlib, pyspedas; p=pathlib.Path(pyspedas.__file__).resolve(); print(p); assert p.is_relative_to(pathlib.Path.cwd())'
-          python -P ../research_ps03_ps05.py
-      - name: MMS actual coordinate rotation time alignment
-        if: always()
+          python -P -c 'import pathlib, pyspedas; p=pathlib.Path(pyspedas.__file__).resolve(); assert p.is_relative_to(pathlib.Path.cwd()); print(p)'
+          python -P ../research_ps05b_public_real.py ${{ matrix.case }} baseline
+      - name: Test minimal candidate fix in runner only
         working-directory: upstream
         env:
           PYTHONPATH: ${{ github.workspace }}/upstream
-        run: python -P ../research_ps05_mms_grid.py
-      - name: Native regression and IDL reference
-        if: always()
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('pyspedas/projects/mms/cotrans/mms_cotrans_qrotate.py')
+          s=p.read_text()
+          old='if len(data.times) != len(q_data.times):'
+          assert s.count(old)==1
+          p.write_text(s.replace('import logging\n','import logging\nimport numpy as np\n',1).replace(old,'if not np.array_equal(data.times, q_data.times):'))
+          PY
+          git diff --check
+          git diff
+          python -P ../research_ps05b_public_real.py ${{ matrix.case }} fixed
+      - name: Existing MMS regression suite
+        if: matrix.case == 'real'
         working-directory: upstream
         env:
           PYTHONPATH: ${{ github.workspace }}/upstream
-        run: python -P -m unittest -v pyspedas.utilities.tests.test_tinterpol_mxn pyspedas.utilities.tests.test_interpolate_rotation
+        run: python -P -m unittest -v pyspedas.projects.mms.tests.test_mms_cotrans
