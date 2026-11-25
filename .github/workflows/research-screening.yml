@@ -31,6 +31,12 @@ jobs:
           git rev-parse HEAD
           python -P -c 'import pathlib, pyspedas; p=pathlib.Path(pyspedas.__file__).resolve(); print(p); assert p.is_relative_to(pathlib.Path.cwd())'
           python -P ../research_ps03_ps05.py
+      - name: MMS actual coordinate rotation time alignment
+        if: always()
+        working-directory: upstream
+        env:
+          PYTHONPATH: ${{ github.workspace }}/upstream
+        run: python -P ../research_ps05_mms_grid.py
       - name: Native regression and IDL reference
         if: always()
         working-directory: upstream
