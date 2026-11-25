@@ -1,55 +1,69 @@
-name: PS05B MMS public API and real MEC data A B
+name: PS05B exact staging validation
 on:
   workflow_dispatch:
 permissions:
   contents: read
 jobs:
-  evidence:
+  regression:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        case: [public, real]
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/checkout@v5
         with:
-          repository: spedas/pyspedas
-          ref: 3e4cb176f6aeb1577fac288ca03199bcfc546c29
-          path: upstream
+          repository: Johnny-Kao/pyspedas
+          ref: 4c71967ce652d8ca16e811f33f8e156ffb057389
+          fetch-depth: 3
           persist-credentials: false
       - uses: actions/setup-python@v7
         with:
-          python-version: '3.12'
-      - run: python -m pip install -e ./upstream
-      - name: Verify old behavior with public API
-        working-directory: upstream
+          python-version: '3.14'
+      - run: python -m pip install -e .
+      - name: Exact staging provenance and baseline RED
         env:
-          PYTHONPATH: ${{ github.workspace }}/upstream
+          PYTHONPATH: ${{ github.workspace }}
         run: |
           git rev-parse HEAD
-          python -P -c 'import pathlib, pyspedas; p=pathlib.Path(pyspedas.__file__).resolve(); assert p.is_relative_to(pathlib.Path.cwd()); print(p)'
-          python -P ../research_ps05b_public_real.py ${{ matrix.case }} baseline
-      - name: Test minimal candidate fix in runner only
-        working-directory: upstream
+          python -P -c 'import pathlib, pyspedas; p=pathlib.Path(pyspedas.__file__).resolve(); print(p); assert p.is_relative_to(pathlib.Path.cwd())'
+          git restore --source=3e4cb176f6aeb1577fac288ca03199bcfc546c29 pyspedas/projects/mms/cotrans/mms_cotrans_qrotate.py pyspedas/projects/mms/cotrans/mms_qcotrans.py
+          python -P - <<'PY'
+          import unittest
+          name='pyspedas.projects.mms.tests.test_mms_cotrans.CotransTestCases.test_qcotrans_time_alignment'
+          result=unittest.TextTestRunner(verbosity=2).run(unittest.defaultTestLoader.loadTestsFromName(name))
+          assert len(result.failures)==2 and not result.errors, 'Expected two equal-count failures and no errors'
+          PY
+      - name: Restore candidate and run full native MMS cotrans module
         env:
-          PYTHONPATH: ${{ github.workspace }}/upstream
+          PYTHONPATH: ${{ github.workspace }}
         run: |
+          git restore --source=HEAD pyspedas/projects/mms/cotrans/mms_cotrans_qrotate.py pyspedas/projects/mms/cotrans/mms_qcotrans.py
+          git diff --exit-code
+          python -P -m unittest -v pyspedas.projects.mms.tests.test_mms_cotrans
+      - name: Run rotation and quaternion reference tests
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -P -m unittest -v pyspedas.utilities.tests.test_interpolate_rotation pyspedas.cotrans_tools.tests.test_quaternions
+  docs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          repository: Johnny-Kao/pyspedas
+          ref: 4c71967ce652d8ca16e811f33f8e156ffb057389
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.14'
+      - run: python -m pip install -e . --group doc
+      - run: python -m pip install -r docs/requirements.txt
+      - name: Build and inspect rendered documentation
+        run: |
+          make -C docs html
           python - <<'PY'
           from pathlib import Path
-          p=Path('pyspedas/projects/mms/cotrans/mms_cotrans_qrotate.py')
+          p=next(Path('docs').rglob('mms_analysis.html'))
           s=p.read_text()
-          old='if len(data.times) != len(q_data.times):'
-          assert s.count(old)==1
-          p.write_text(s.replace('import logging\n','import logging\nimport numpy as np\n',1).replace(old,'if not np.array_equal(data.times, q_data.times):'))
+          assert 'MEC quaternions are interpolated to the input vector timestamps whenever' in s
+          assert 'their time grids differ.' in s
+          print('Verified rendered MMS timestamp alignment documentation:', p)
           PY
-          git diff --check
-          git diff
-          python -P ../research_ps05b_public_real.py ${{ matrix.case }} fixed
-      - name: Existing MMS regression suite
-        if: matrix.case == 'real'
-        working-directory: upstream
-        env:
-          PYTHONPATH: ${{ github.workspace }}/upstream
-        run: python -P -m unittest -v pyspedas.projects.mms.tests.test_mms_cotrans
